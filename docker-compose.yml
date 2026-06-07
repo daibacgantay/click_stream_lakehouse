@@ -108,7 +108,7 @@ services:
       dockerfile: Dockerfile
     image: lakehouse/spark:3.5.8
     container_name: spark-master
-    command: master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     environment:
       SPARK_MASTER_HOST: spark-master
     ports:
@@ -127,7 +127,7 @@ services:
       dockerfile: Dockerfile
     image: lakehouse/spark:3.5.8
     container_name: spark-worker-1
-    command: worker spark://spark-master:7077
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
       - spark-master
     environment:
@@ -146,7 +146,7 @@ services:
       dockerfile: Dockerfile
     image: lakehouse/spark:3.5.8
     container_name: spark-worker-2
-    command: worker spark://spark-master:7077
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
       - spark-master
     environment:
@@ -165,7 +165,7 @@ services:
       dockerfile: Dockerfile
     image: lakehouse/spark:3.5.8
     container_name: spark-history-server
-    command: history-server
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.history.HistoryServer
     depends_on:
       - spark-master
       - minio-init
@@ -194,16 +194,17 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres:5432/${AIRFLOW_DB_NAME}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+      _AIRFLOW_WWW_USER_FIRSTNAME: Admin
+      _AIRFLOW_WWW_USER_LASTNAME: User
+      _AIRFLOW_WWW_USER_EMAIL: admin@lakehouse.local
+      _AIRFLOW_WWW_USER_ROLE: Admin
     entrypoint: /bin/bash
-    command: >
-      -c "
-      airflow db migrate &&
-      airflow users create
-        --username ${AIRFLOW_ADMIN_USER}
-        --password ${AIRFLOW_ADMIN_PASSWORD}
-        --firstname Admin --lastname User
-        --role Admin --email admin@lakehouse.local || true
-      "
+    command: -c "exec /entrypoint airflow version"
     networks:
       - lakehouse
 
@@ -222,16 +223,21 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres:5432/${AIRFLOW_DB_NAME}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET}
+      AIRFLOW__FAB__SESSION_BACKEND: securecookie
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
       SPARK_MASTER_URL: ${SPARK_MASTER_URL}
-    command: webserver
+      AIRFLOW_CONN_SPARK_DEFAULT: '{"conn_type": "spark", "host": "spark://spark-master", "port": 7077}'
+    command: api-server
     ports:
       - "8081:8080"   # Airflow Web UI
     volumes:
       - ./dags:/opt/airflow/dags
+      - ./ingestion:/opt/airflow/jobs:ro
       - airflow_logs:/opt/airflow/logs
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/monitor/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -254,10 +260,42 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres:5432/${AIRFLOW_DB_NAME}
       AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
+      AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET}
       SPARK_MASTER_URL: ${SPARK_MASTER_URL}
+      AIRFLOW_CONN_SPARK_DEFAULT: '{"conn_type": "spark", "host": "spark://spark-master", "port": 7077}'
+      SPARK_CONF_DIR: /opt/spark/conf
     command: scheduler
     volumes:
       - ./dags:/opt/airflow/dags
+      - ./ingestion:/opt/airflow/jobs:ro
+      - ./data:/opt/spark/data:ro
+      - ./docker/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - airflow_logs:/opt/airflow/logs
+    networks:
+      - lakehouse
+
+  airflow-dag-processor:
+    build:
+      context: ./docker/airflow
+      dockerfile: Dockerfile
+    image: lakehouse/airflow:3.0
+    container_name: airflow-dag-processor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${AIRFLOW_DB_USER}:${AIRFLOW_DB_PASSWORD}@postgres:5432/${AIRFLOW_DB_NAME}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+      AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    command: dag-processor
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./ingestion:/opt/airflow/jobs:ro
       - airflow_logs:/opt/airflow/logs
     networks:
       - lakehouse
