@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<configuration>
+
+  <!--
+    Thư mục mặc định Hive dùng khi tạo table.
+    Hive chỉ lưu chuỗi URI này làm metadata — Spark mới là bên
+    thực sự đọc/ghi file tại địa chỉ này qua S3A.
+  -->
+  <property>
+    <name>hive.metastore.warehouse.dir</name>
+    <value>s3a://lakehouse/</value>
+  </property>
+
+  <!-- Port Thrift — Spark và Trino kết nối vào đây để tra cứu metadata -->
+  <property>
+    <name>hive.metastore.port</name>
+    <value>9083</value>
+  </property>
+
+  <!--
+    Tắt strict schema check — cho phép Hive tự tạo schema trong PostgreSQL
+    lần đầu khởi động thay vì báo lỗi "schema not found"
+  -->
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>false</value>
+  </property>
+
+  <property>
+    <name>datanucleus.schema.autoCreateAll</name>
+    <value>true</value>
+  </property>
+
+  <!-- Tăng timeout tránh lỗi kết nối chậm lúc cold start -->
+  <property>
+    <name>hive.metastore.client.socket.timeout</name>
+    <value>300s</value>
+  </property>
+
+</configuration>
