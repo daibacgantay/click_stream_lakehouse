@@ -2,7 +2,7 @@
 
 A production-grade **Data Lakehouse** pipeline built on the Medallion Architecture (Bronze → Silver → Gold), processing e-commerce clickstream data using Apache Spark, Delta Lake, MinIO, Hive Metastore, Apache Airflow, and Trino — fully containerised with Docker Compose.
 
-![Architecture Diagram](Blank%20diagram.png)
+![Architecture Diagram]<img src="assets/Blank diagram.png" width="800"/>
 
 ---
 
